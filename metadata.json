@@ -1,0 +1,7 @@
+{
+  "name": "CrisisWatch AI",
+  "description": "A real-time global crisis monitor powered by Gemini. Tracks major catastrophic events, technological breakthroughs, and geopolitical shifts with AI-driven summarization, voice control, and text-to-speech capabilities.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
