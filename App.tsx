@@ -1,256 +1,590 @@
+import React, { useMemo, useState } from 'react';
+import {
+  Building2,
+  CircuitBoard,
+  Factory,
+  Home,
+  Landmark,
+  Leaf,
+  MapPinned,
+  Route,
+  ShieldAlert,
+  Sparkles,
+  Tractor,
+  TrainFront,
+  TrendingUp,
+  Trees,
+  Zap,
+} from 'lucide-react';
 
-import React, { useState, useEffect } from 'react';
-import { CATEGORIES, getIcon } from './constants';
-import { NewsItem, AppState } from './types';
-import { fetchNewsByCategory } from './services/geminiService';
-import { getStoredNews, saveNewsToDb, getLastUpdatedTime } from './services/storageService';
-import NewsCard from './components/NewsCard';
-import VoiceControl from './components/VoiceControl';
-import NotificationBanner from './components/NotificationBanner';
-import { Radio, AlertOctagon, RotateCw, Menu, X, Database } from 'lucide-react';
+type BuildingId =
+  | 'residential'
+  | 'highrise'
+  | 'farm'
+  | 'factory'
+  | 'commerce'
+  | 'power'
+  | 'water'
+  | 'transit'
+  | 'park'
+  | 'road';
+
+type BuildingDefinition = {
+  id: BuildingId;
+  name: string;
+  category: string;
+  description: string;
+  cost: number;
+  icon: React.ReactNode;
+};
+
+type MarketGood = {
+  id: string;
+  name: string;
+  price: number;
+  change: number;
+  icon: React.ReactNode;
+};
+
+type Policy = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+const GRID_SIZE = 10;
+
+const BUILDINGS: BuildingDefinition[] = [
+  {
+    id: 'residential',
+    name: 'Residential Zone',
+    category: 'Housing',
+    description: '+40 pop, medium demand for utilities.',
+    cost: 120,
+    icon: <Home className="w-5 h-5" />,
+  },
+  {
+    id: 'highrise',
+    name: 'High-Rise Block',
+    category: 'Housing',
+    description: '+90 pop, higher utility load, boosts downtown.',
+    cost: 240,
+    icon: <Building2 className="w-5 h-5" />,
+  },
+  {
+    id: 'farm',
+    name: 'Agri Farm',
+    category: 'Production',
+    description: '+25 food, low jobs, eco-friendly.',
+    cost: 90,
+    icon: <Tractor className="w-5 h-5" />,
+  },
+  {
+    id: 'factory',
+    name: 'Manufacturing Hub',
+    category: 'Industry',
+    description: '+20 goods, +45 jobs, raises pollution.',
+    cost: 220,
+    icon: <Factory className="w-5 h-5" />,
+  },
+  {
+    id: 'commerce',
+    name: 'Commerce District',
+    category: 'Services',
+    description: '+35 jobs, +taxes, boosts tourism.',
+    cost: 180,
+    icon: <Landmark className="w-5 h-5" />,
+  },
+  {
+    id: 'power',
+    name: 'Fusion Plant',
+    category: 'Utilities',
+    description: '+40 power, supports industrial demand.',
+    cost: 260,
+    icon: <Zap className="w-5 h-5" />,
+  },
+  {
+    id: 'water',
+    name: 'Water Treatment',
+    category: 'Utilities',
+    description: '+30 water, stabilizes public health.',
+    cost: 200,
+    icon: <Leaf className="w-5 h-5" />,
+  },
+  {
+    id: 'transit',
+    name: 'Transit Hub',
+    category: 'Mobility',
+    description: 'Cuts commute time, reduces traffic.',
+    cost: 150,
+    icon: <TrainFront className="w-5 h-5" />,
+  },
+  {
+    id: 'park',
+    name: 'City Park',
+    category: 'Amenities',
+    description: '+happiness, +tourism, lowers crime.',
+    cost: 110,
+    icon: <Trees className="w-5 h-5" />,
+  },
+  {
+    id: 'road',
+    name: 'Road Tile',
+    category: 'Infrastructure',
+    description: 'Improves traffic flow and logistics.',
+    cost: 20,
+    icon: <Route className="w-5 h-5" />,
+  },
+];
+
+const POLICIES: Policy[] = [
+  {
+    id: 'green-grid',
+    name: 'Green Grid Incentives',
+    description: 'Subsidize clean power, cut pollution growth by 15%.',
+  },
+  {
+    id: 'night-shift',
+    name: 'Night Shift Logistics',
+    description: 'Factories operate off-peak, reduces traffic by 10%.',
+  },
+  {
+    id: 'tourism',
+    name: 'Tourism Campaign',
+    description: '+12% visitor revenue, +5% job growth in commerce.',
+  },
+  {
+    id: 'community-policing',
+    name: 'Community Policing',
+    description: 'Crime incidents drop by 20%, improves resident trust.',
+  },
+];
+
+const INITIAL_MARKET: MarketGood[] = [
+  { id: 'food', name: 'Food', price: 18, change: 1.2, icon: <Tractor className="w-4 h-4" /> },
+  { id: 'goods', name: 'Goods', price: 32, change: -2.4, icon: <Factory className="w-4 h-4" /> },
+  { id: 'power', name: 'Power', price: 14, change: 0.8, icon: <Zap className="w-4 h-4" /> },
+  { id: 'tourism', name: 'Tourism', price: 22, change: 3.1, icon: <Sparkles className="w-4 h-4" /> },
+  { id: 'research', name: 'Research', price: 28, change: -1.6, icon: <CircuitBoard className="w-4 h-4" /> },
+];
+
+const createEmptyGrid = () => Array.from({ length: GRID_SIZE * GRID_SIZE }, () => null as BuildingId | null);
 
 const App: React.FC = () => {
-  const [activeCategoryId, setActiveCategoryId] = useState<string>(CATEGORIES[0].id);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [appState, setAppState] = useState<AppState>(AppState.IDLE);
-  const [error, setError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [selectedBuildingId, setSelectedBuildingId] = useState<BuildingId>('residential');
+  const [grid, setGrid] = useState<(BuildingId | null)[]>(createEmptyGrid());
+  const [treasury, setTreasury] = useState(3200);
+  const [day, setDay] = useState(12);
+  const [taxRate, setTaxRate] = useState(12);
+  const [market, setMarket] = useState<MarketGood[]>(INITIAL_MARKET);
+  const [activePolicies, setActivePolicies] = useState<string[]>(['green-grid', 'community-policing']);
 
-  const activeCategory = CATEGORIES.find(c => c.id === activeCategoryId) || CATEGORIES[0];
+  const buildingLookup = useMemo(() => {
+    const map = new Map<BuildingId, BuildingDefinition>();
+    BUILDINGS.forEach((building) => map.set(building.id, building));
+    return map;
+  }, []);
 
-  useEffect(() => {
-    if (!process.env.API_KEY) {
-        setApiKeyMissing(true);
-        return;
-    }
-    
-    // Check DB first
-    const stored = getStoredNews(activeCategoryId);
-    const updatedTime = getLastUpdatedTime(activeCategoryId);
-    
-    if (stored && stored.length > 0) {
-        setNews(stored);
-        setLastUpdated(updatedTime);
-        setAppState(AppState.SUCCESS);
-    } else {
-        loadNews(activeCategoryId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCategoryId]);
-
-  const loadNews = async (categoryId: string, forceRefresh = false) => {
-    setAppState(AppState.LOADING);
-    setError(null);
-    try {
-      const items = await fetchNewsByCategory(categoryId);
-      if (items.length > 0) {
-        setNews(items);
-        saveNewsToDb(categoryId, items);
-        setLastUpdated(new Date().toLocaleString());
-        setAppState(AppState.SUCCESS);
-      } else {
-         setError("No significant events found in this sector recently.");
-         setAppState(AppState.ERROR);
+  const counts = useMemo(() => {
+    return grid.reduce<Record<BuildingId, number>>(
+      (acc, tile) => {
+        if (tile) acc[tile] += 1;
+        return acc;
+      },
+      {
+        residential: 0,
+        highrise: 0,
+        farm: 0,
+        factory: 0,
+        commerce: 0,
+        power: 0,
+        water: 0,
+        transit: 0,
+        park: 0,
+        road: 0,
       }
-    } catch (err) {
-      console.error(err);
-      setError("Failed to retrieve intelligence data. Systems may be offline or rate limited.");
-      setAppState(AppState.ERROR);
+    );
+  }, [grid]);
+
+  const population = counts.residential * 40 + counts.highrise * 90;
+  const jobs = counts.factory * 45 + counts.commerce * 35 + counts.farm * 8 + counts.transit * 6;
+  const jobFill = population === 0 ? 0 : Math.min(100, Math.round((jobs / population) * 100));
+  const happiness = Math.min(100, 62 + counts.park * 4 + counts.transit * 2 - counts.factory * 2);
+  const crime = Math.max(8, 34 - counts.park * 2 - activePolicies.length * 2 + counts.factory * 1.5);
+  const tourism = Math.min(100, 20 + counts.commerce * 3 + counts.park * 4);
+  const traffic = Math.max(5, 48 + counts.factory * 2 + counts.commerce * 1.5 - counts.road * 2 - counts.transit * 4);
+
+  const production = {
+    power: counts.power * 40 + counts.road * 1,
+    water: counts.water * 30,
+    food: counts.farm * 25,
+    goods: counts.factory * 20,
+    research: counts.commerce * 6 + counts.transit * 4,
+  };
+
+  const demand = {
+    power: Math.round(population * 0.6 + counts.commerce * 8 + counts.factory * 10),
+    water: Math.round(population * 0.5 + counts.factory * 6),
+    food: Math.round(population * 0.4),
+    goods: Math.round(population * 0.3 + counts.commerce * 4),
+    research: Math.round(population * 0.2),
+  };
+
+  const needs = {
+    power: Math.min(100, Math.round((production.power / Math.max(demand.power, 1)) * 100)),
+    water: Math.min(100, Math.round((production.water / Math.max(demand.water, 1)) * 100)),
+    food: Math.min(100, Math.round((production.food / Math.max(demand.food, 1)) * 100)),
+    goods: Math.min(100, Math.round((production.goods / Math.max(demand.goods, 1)) * 100)),
+    research: Math.min(100, Math.round((production.research / Math.max(demand.research, 1)) * 100)),
+  };
+
+  const objectives = [
+    { id: 'objective-1', label: 'Reach 500 population', complete: population >= 500 },
+    { id: 'objective-2', label: 'Keep happiness above 70%', complete: happiness >= 70 },
+    { id: 'objective-3', label: 'Maintain power coverage above 85%', complete: needs.power >= 85 },
+    { id: 'objective-4', label: 'Attract 40+ tourism rating', complete: tourism >= 40 },
+  ];
+
+  const handleTileClick = (index: number) => {
+    const current = grid[index];
+    if (current) {
+      return;
     }
+    const selectedBuilding = buildingLookup.get(selectedBuildingId);
+    if (!selectedBuilding) return;
+    if (treasury < selectedBuilding.cost) {
+      return;
+    }
+
+    setGrid((prev) => {
+      const next = [...prev];
+      next[index] = selectedBuildingId;
+      return next;
+    });
+    setTreasury((prev) => prev - selectedBuilding.cost);
   };
 
-  const handleRefresh = () => {
-    loadNews(activeCategoryId, true);
+  const handleAdvanceDay = () => {
+    setDay((prev) => prev + 1);
+    setTreasury((prev) => prev + Math.round(population * (taxRate / 100) * 2.4));
+    setMarket((prev) =>
+      prev.map((good) => {
+        const swing = (Math.random() * 6 - 3) / 10;
+        const nextPrice = Math.max(6, good.price + swing * good.price);
+        const nextChange = swing * 10;
+        return { ...good, price: Number(nextPrice.toFixed(1)), change: Number(nextChange.toFixed(1)) };
+      })
+    );
   };
 
-  if (apiKeyMissing) {
-      return (
-          <div className="min-h-screen bg-black text-red-600 flex flex-col items-center justify-center p-8 text-center font-mono">
-              <AlertOctagon className="w-24 h-24 mb-6 animate-pulse" />
-              <h1 className="text-4xl font-bold mb-4">SYSTEM LOCKED</h1>
-              <p className="max-w-md text-gray-400">
-                  Critical security missing: <code className="bg-red-900/20 px-2 py-1 text-red-500">API_KEY</code> environment variable not detected.
-                  <br/><br/>
-                  Please configure access to Gemini Protocol.
-              </p>
-          </div>
-      );
-  }
+  const togglePolicy = (id: string) => {
+    setActivePolicies((prev) =>
+      prev.includes(id) ? prev.filter((policy) => policy !== id) : [...prev, id]
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-dark-900 text-gray-200 font-sans selection:bg-red-900 selection:text-white overflow-x-hidden flex flex-col">
-      
-      {/* Mobile Sidebar */}
-      <div className={`fixed inset-0 z-50 bg-black/95 backdrop-blur-xl transform transition-transform duration-300 lg:hidden ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6">
-            <div className="flex justify-between items-center mb-8">
-                <span className="text-2xl font-display font-bold text-white tracking-tighter">
-                    CRISIS<span className="text-red-500">WATCH</span>
-                </span>
-                <button onClick={() => setSidebarOpen(false)}><X className="w-8 h-8" /></button>
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-6 py-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs uppercase tracking-[0.25em]">
+              City Builder Sim
             </div>
-            <nav className="space-y-4">
-                {CATEGORIES.map(cat => (
-                    <button
-                        key={cat.id}
-                        onClick={() => { setActiveCategoryId(cat.id); setSidebarOpen(false); }}
-                        className={`w-full flex items-center space-x-4 p-4 rounded-xl transition-all border ${
-                            activeCategoryId === cat.id 
-                            ? `bg-${cat.color}-500/10 border-${cat.color}-500 text-${cat.color}-500 font-bold` 
-                            : 'bg-dark-800 border-transparent text-gray-400'
-                        }`}
-                    >
-                        {getIcon(cat.icon, "w-6 h-6")}
-                        <span className="uppercase tracking-wider text-sm">{cat.name}</span>
-                    </button>
-                ))}
-            </nav>
+            <div>
+              <h1 className="text-2xl font-semibold">Neo Horizon Metro</h1>
+              <p className="text-sm text-slate-400">Day {day} · Scenario: Coastal Logistics Corridor</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2">
+              <p className="text-slate-400">Treasury</p>
+              <p className="text-lg font-semibold text-emerald-300">${treasury.toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2">
+              <p className="text-slate-400">Population</p>
+              <p className="text-lg font-semibold">{population.toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2">
+              <p className="text-slate-400">Employment</p>
+              <p className="text-lg font-semibold">{jobFill}%</p>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2">
+              <p className="text-slate-400">Happiness</p>
+              <p className="text-lg font-semibold">{happiness}%</p>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="flex h-screen overflow-hidden">
-        
-        {/* Desktop Sidebar */}
-        <aside className="hidden lg:flex flex-col w-72 bg-dark-900 border-r border-dark-800 h-full p-6 relative z-20">
-            <div className="mb-10 flex items-center space-x-2">
-                <div className="relative">
-                    <Radio className="w-6 h-6 text-red-500 animate-pulse" />
-                    <span className="absolute inset-0 bg-red-500 blur-lg opacity-20 animate-pulse"></span>
-                </div>
-                <span className="text-2xl font-display font-bold text-white tracking-tighter">
-                    CRISIS<span className="text-red-500">WATCH</span>
-                </span>
+      <main className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 xl:grid-cols-[260px_1fr_340px] gap-6">
+        <section className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Build Menu</h2>
+              <MapPinned className="w-4 h-4 text-slate-500" />
             </div>
+            <div className="space-y-3">
+              {BUILDINGS.map((building) => (
+                <button
+                  key={building.id}
+                  onClick={() => setSelectedBuildingId(building.id)}
+                  className={`w-full text-left p-3 rounded-xl border transition ${
+                    selectedBuildingId === building.id
+                      ? 'border-emerald-400/70 bg-emerald-500/10 text-emerald-200'
+                      : 'border-slate-800 bg-slate-950/30 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-emerald-300">{building.icon}</span>
+                    <div>
+                      <p className="text-sm font-semibold">{building.name}</p>
+                      <p className="text-xs text-slate-400">{building.description}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-400">Cost: ${building.cost}</div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-            <nav className="flex-1 space-y-2 overflow-y-auto hide-scrollbar pb-6">
-                {CATEGORIES.map(cat => (
-                    <button
-                        key={cat.id}
-                        onClick={() => setActiveCategoryId(cat.id)}
-                        className={`w-full flex items-center space-x-3 p-3.5 rounded-xl transition-all group border ${
-                            activeCategoryId === cat.id 
-                            ? `bg-${cat.color}-500/10 border-${cat.color}-500/50 text-${cat.color}-400 shadow-[0_0_15px_-3px_rgba(0,0,0,0.1)] shadow-${cat.color}-500/10` 
-                            : 'border-transparent text-gray-500 hover:bg-dark-800 hover:text-gray-200'
-                        }`}
-                    >
-                        {getIcon(cat.icon, `w-5 h-5 ${activeCategoryId === cat.id ? `text-${cat.color}-500` : 'group-hover:text-white'}`)}
-                        <span className="text-sm font-medium tracking-wide">{cat.name}</span>
-                    </button>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Zoning & Traffic</h2>
+            <div className="space-y-3 text-sm text-slate-300">
+              <div className="flex justify-between">
+                <span>Residential Coverage</span>
+                <span className="font-semibold text-emerald-300">{counts.residential + counts.highrise} zones</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Industrial Footprint</span>
+                <span className="font-semibold">{counts.factory} hubs</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Road Tiles</span>
+                <span className="font-semibold">{counts.road}</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 mb-2">Traffic Simulation</p>
+              <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-400" style={{ width: `${Math.min(100, traffic)}%` }} />
+              </div>
+              <p className="text-xs text-slate-500 mt-2">Congestion Index: {Math.round(traffic)}%</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">City Grid</h2>
+              <button
+                onClick={handleAdvanceDay}
+                className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 rounded-full hover:bg-emerald-500/30 transition"
+              >
+                Advance Day
+              </button>
+            </div>
+            <div className="grid grid-cols-10 gap-2">
+              {grid.map((tile, index) => (
+                <button
+                  key={`tile-${index}`}
+                  onClick={() => handleTileClick(index)}
+                  className={`h-14 w-full rounded-lg border text-left p-2 transition ${
+                    tile ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-600'
+                  }`}
+                >
+                  {tile ? (
+                    <div className="flex flex-col text-xs text-slate-300">
+                      <span className="text-emerald-300">{buildingLookup.get(tile)?.icon}</span>
+                      <span className="text-[11px] text-slate-400">{buildingLookup.get(tile)?.name}</span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-600">Empty</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 mt-4">
+              Click a tile to place the selected building. Road networks and transit hubs reduce commute time and logistics
+              costs.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Agents & Needs</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Employment</span>
+                  <span className="text-emerald-300">{jobs.toLocaleString()} jobs</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span>Commute Time</span>
+                  <span className="text-amber-300">{Math.max(12, 38 - counts.transit * 3 - counts.road)} min</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span>Crime Index</span>
+                  <span className="text-rose-300">{Math.round(crime)}%</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span>Tourism Flow</span>
+                  <span className="text-sky-300">{Math.round(tourism)} / 100</span>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {Object.entries(needs).map(([key, value]) => (
+                  <div key={key}>
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="capitalize">{key} coverage</span>
+                      <span>{value}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${value > 80 ? 'bg-emerald-400' : value > 60 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                        style={{ width: `${Math.min(100, value)}%` }}
+                      />
+                    </div>
+                  </div>
                 ))}
-            </nav>
-
-            <div className="mt-auto pt-6 border-t border-dark-800">
-                <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
-                    <span className="uppercase tracking-widest font-bold">Database Status</span>
-                    <Database className="w-3 h-3" />
-                </div>
-                <div className="bg-dark-800 rounded p-3 text-xs">
-                     <div className="flex items-center space-x-2 text-green-500 mb-1">
-                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                        <span>Synced</span>
-                    </div>
-                    <div className="text-gray-600 truncate">
-                        Last Update: <br/> {lastUpdated || 'Never'}
-                    </div>
-                </div>
+              </div>
             </div>
-        </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-dark-900">
-            
-            {/* Header */}
-            <header className="h-20 border-b border-dark-800 flex items-center justify-between px-6 lg:px-10 bg-dark-900/80 backdrop-blur-md sticky top-0 z-40">
-                <div className="flex items-center lg:hidden">
-                    <button onClick={() => setSidebarOpen(true)} className="mr-4 text-gray-400">
-                        <Menu className="w-6 h-6" />
-                    </button>
-                    <span className="font-display font-bold text-xl">CRISIS<span className="text-red-500">WATCH</span></span>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Supply Chain Flow</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span>Food</span>
+                  <span className="text-emerald-300">{production.food} produced · {demand.food} consumed</span>
                 </div>
-
-                <div className="hidden lg:flex flex-col">
-                     <h1 className={`text-2xl font-display font-bold uppercase tracking-wide flex items-center gap-3 text-white`}>
-                        {activeCategory.name}
-                        <span className={`text-xs px-2 py-0.5 rounded border border-${activeCategory.color}-500/30 text-${activeCategory.color}-500 bg-${activeCategory.color}-500/10`}>
-                            Live Feed
-                        </span>
-                     </h1>
+                <div className="flex items-center justify-between">
+                  <span>Goods</span>
+                  <span className="text-emerald-300">{production.goods} produced · {demand.goods} consumed</span>
                 </div>
-
-                <div className="flex items-center space-x-4">
-                    <VoiceControl onCategoryChange={setActiveCategoryId} onRefresh={handleRefresh} />
-                    
-                    <button 
-                        onClick={handleRefresh}
-                        disabled={appState === AppState.LOADING}
-                        className={`group flex items-center gap-2 px-4 py-2 rounded-full border border-dark-700 bg-dark-800 hover:bg-dark-700 transition-all ${
-                            appState === AppState.LOADING ? 'opacity-70 cursor-not-allowed' : ''
-                        }`}
-                        title="Force Database Refresh"
-                    >
-                        <RotateCw className={`w-4 h-4 text-gray-400 group-hover:text-white ${appState === AppState.LOADING ? 'animate-spin text-red-500' : ''}`} />
-                        <span className="hidden md:inline text-xs font-bold text-gray-400 group-hover:text-white uppercase">
-                            {appState === AppState.LOADING ? 'Scanning...' : 'Refresh DB'}
-                        </span>
-                    </button>
+                <div className="flex items-center justify-between">
+                  <span>Power</span>
+                  <span className="text-emerald-300">{production.power} generated · {demand.power} used</span>
                 </div>
-            </header>
-
-            {/* Notification Banner */}
-            <NotificationBanner news={news} currentCategory={activeCategoryId} />
-
-            {/* News Grid */}
-            <div className="flex-1 overflow-y-auto p-4 lg:p-10 scroll-smooth">
-                {appState === AppState.LOADING && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
-                        {[1, 2, 3, 4, 5, 6].map(i => (
-                            <div key={i} className="bg-dark-800 h-96 rounded-2xl border border-dark-700"></div>
-                        ))}
-                    </div>
-                )}
-
-                {appState === AppState.ERROR && (
-                    <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                        <div className="bg-red-500/10 p-6 rounded-full mb-6">
-                             <AlertOctagon className="w-12 h-12 text-red-500" />
-                        </div>
-                        <h2 className="text-2xl font-bold text-white mb-2">Signal Lost</h2>
-                        <p className="text-gray-500 max-w-md mb-8">{error}</p>
-                        <button 
-                            onClick={handleRefresh}
-                            className="px-8 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-bold uppercase tracking-wider text-sm shadow-lg shadow-red-900/20"
-                        >
-                            Reconnect
-                        </button>
-                    </div>
-                )}
-
-                {appState === AppState.SUCCESS && news.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
-                         <div className="bg-dark-800 p-8 rounded-full mb-4">
-                             {getIcon(activeCategory.icon, "w-12 h-12 opacity-50")}
-                         </div>
-                         <p className="text-lg">No critical alerts detected in {activeCategory.name}.</p>
-                         <button onClick={handleRefresh} className="mt-4 text-red-500 hover:text-red-400 text-sm font-bold">Force Deep Scan</button>
-                    </div>
-                )}
-
-                {appState === AppState.SUCCESS && news.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-20">
-                        {news.map((item, index) => (
-                            <NewsCard 
-                                key={item.id || index} 
-                                item={item} 
-                                category={activeCategory}
-                            />
-                        ))}
-                    </div>
-                )}
+                <div className="flex items-center justify-between">
+                  <span>Water</span>
+                  <span className="text-emerald-300">{production.water} processed · {demand.water} used</span>
+                </div>
+              </div>
+              <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3 text-xs text-slate-400">
+                <p>Transport score: {Math.max(40, 70 + counts.road * 2 + counts.transit * 4 - counts.factory * 3)}%</p>
+                <p className="mt-1">Logistics bottlenecks appear when traffic exceeds 70%.</p>
+              </div>
             </div>
-        </main>
-      </div>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Policies & Taxes</h2>
+            <div>
+              <label className="text-xs text-slate-400">Tax Rate: {taxRate}%</label>
+              <input
+                type="range"
+                min={5}
+                max={25}
+                value={taxRate}
+                onChange={(event) => setTaxRate(Number(event.target.value))}
+                className="w-full accent-emerald-400"
+              />
+            </div>
+            <div className="space-y-2">
+              {POLICIES.map((policy) => (
+                <button
+                  key={policy.id}
+                  onClick={() => togglePolicy(policy.id)}
+                  className={`w-full rounded-xl border p-3 text-left text-xs transition ${
+                    activePolicies.includes(policy.id)
+                      ? 'border-emerald-400/70 bg-emerald-500/10 text-emerald-200'
+                      : 'border-slate-800 bg-slate-950/30 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <p className="text-sm font-semibold">{policy.name}</p>
+                  <p>{policy.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Disaster & Safety</h2>
+            <div className="space-y-3 text-sm text-slate-300">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-rose-300" /> Flood Risk</span>
+                <span className="text-rose-300">Medium</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-amber-300" /> Power Blackouts</span>
+                <span className="text-amber-300">Low</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-sky-300" /> Cyber Attacks</span>
+                <span className="text-sky-300">Low</span>
+              </div>
+            </div>
+            <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3 text-xs text-slate-400">
+              Emergency response coverage: {Math.min(98, 62 + counts.road * 1.5 + counts.transit * 2)}%
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Tech Tree & Objectives</h2>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><CircuitBoard className="w-4 h-4 text-emerald-300" /> Smart Grid</span>
+                <span className="text-emerald-300">Unlocked</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-slate-400" /> Trade Logistics</span>
+                <span className="text-slate-400">Researching</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><CircuitBoard className="w-4 h-4 text-slate-500" /> AI Traffic Control</span>
+                <span className="text-slate-500">Locked</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {objectives.map((objective) => (
+                <div
+                  key={objective.id}
+                  className={`flex items-center justify-between text-xs border rounded-lg px-3 py-2 ${
+                    objective.complete ? 'border-emerald-400/50 bg-emerald-500/10 text-emerald-200' : 'border-slate-800 bg-slate-950/40 text-slate-400'
+                  }`}
+                >
+                  <span>{objective.label}</span>
+                  <span>{objective.complete ? 'Complete' : 'In progress'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Market Prices</h2>
+            <div className="space-y-3">
+              {market.map((good) => (
+                <div key={good.id} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <span className="text-emerald-300">{good.icon}</span>
+                    <span>{good.name}</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold">${good.price.toFixed(1)}</p>
+                    <p className={`text-xs ${good.change >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      {good.change >= 0 ? '+' : ''}
+                      {good.change.toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500">Export/import prices fluctuate each day based on global demand.</p>
+          </div>
+        </section>
+      </main>
     </div>
   );
 };
